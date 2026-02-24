@@ -1,4 +1,4 @@
-# Wbsites-Meta-Title-Description-Automation
+# Websites Meta Title and Description-Automation
 
 Meta Title & Description automation built in n8n.  
 This workflow takes a website URL and crawls it with the DataForSEO OnPage API, extracts meta titles and descriptions, saves the data to Google Sheets and Google Drive, and emails the user a JSON report plus cost/credit usage information.
