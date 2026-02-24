@@ -1,0 +1,636 @@
+{
+  "name": "Meta Title & Description",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "MetaTitle-And-Description",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -320,
+        -176
+      ],
+      "id": "3a57d1fb-8ce3-477b-8362-d051571106d5",
+      "name": "Webhook",
+      "webhookId": "onpage-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "//curl -X POST \"https://n8n.programmx.com/webhook-test/MetaTitle-And-Description\" -H \"Content-Type: application/json\" -d \"{\\\"website_link\\\": \\\"https://delta-solution.co.uk/\\\", \\\"pages_to_crawl\\\": 10, \\\"email\\\": \\\"ramzanx0553@gmail.com\\\"}\"\n\n// Read webhook body: website_link (or url), pages_to_crawl (or max_crawl_pages), and email\nconst item = $input.first().json;\nconst body = item.body || item;\n\n// 1) Website URL\nconst rawUrl = (body.website_link || body.url || body.website || '').toString().trim();\nif (!rawUrl) {\n  throw new Error('Missing website link. Send JSON like: { \"website_link\": \"https://example.com/\", \"pages_to_crawl\": 100, \"email\": \"user@example.com\" }');\n}\n\nconst startUrl = rawUrl.startsWith('http') ? rawUrl : 'https://' + rawUrl;\nlet domain = '';\ntry {\n  domain = new URL(startUrl).hostname.replace(/^www\\./i, '');\n} catch (e) {\n  domain = rawUrl\n    .replace(/^https?:\\/\\//i, '')\n    .replace(/^www\\./i, '')\n    .split('/')[0]\n    .split('?')[0]\n    .trim();\n}\n\n// 2) Pages to crawl\nconst maxCrawlPages = Math.min(\n  2000,\n  Math.max(\n    1,\n    parseInt(body.pages_to_crawl || body.max_crawl_pages || 100, 10) || 100,\n  ),\n);\n\n// 3) Email (for SMTP node later)\nconst email = (body.email || body.to || '').toString().trim();\n\nreturn [\n  {\n    json: {\n      domain,\n      start_url: startUrl,\n      max_crawl_pages: maxCrawlPages,\n      email, // <‑‑ make available to later nodes\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        -176
+      ],
+      "id": "834d60bb-1a6c-4e57-abcb-cdd7ea71f19f",
+      "name": "Parse Webhook Input"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dataforseo.com/v3/on_page/task_post",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[\n  {\n    \"target\": \"{{ $json.domain }}\",\n    \"max_crawl_pages\": {{ $json.max_crawl_pages }},\n    \"start_url\": \"{{ $json.start_url }}\"\n  }\n]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        144,
+        -176
+      ],
+      "id": "d7fa38b2-4622-48f5-8d50-581c5cd24b67",
+      "name": "Start On-Page Crawl",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "861cV9KnepswAcIx",
+          "name": "DataForSeo"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        352,
+        -176
+      ],
+      "id": "e58ce73d-541a-4646-8ae0-252713fcc9a5",
+      "name": "Wait for Crawl",
+      "webhookId": "onpage-wait-webhook"
+    },
+    {
+      "parameters": {
+        "url": "https://api.dataforseo.com/v3/on_page/tasks_ready",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        -176
+      ],
+      "id": "97a17c63-ce93-434b-a7b7-991ba11f17ca",
+      "name": "Check Tasks Ready",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "861cV9KnepswAcIx",
+          "name": "DataForSeo"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const startCrawl = $('Start On-Page Crawl').first().json;\nconst taskIdFromPost = startCrawl?.tasks?.[0]?.id;\nconst targetFromPost = startCrawl?.tasks?.[0]?.data?.target;\n\nconst tasksReady = $('Check Tasks Ready').first().json;\nconst results = tasksReady?.tasks?.[0]?.result || [];\n\nconst ourTask = results.find(r => r.id === taskIdFromPost || (targetFromPost && r.target && r.target.replace(/^https?:\\/\\//i, '').replace(/^www\\./, '').includes(targetFromPost))) || results[0];\nconst taskId = ourTask?.id || taskIdFromPost;\n\nif (!taskId) {\n  throw new Error('No task id found. Crawl may not be ready yet. Increase Wait time and run again.');\n}\n\nreturn [{ json: { task_id: taskId, target: ourTask?.target || targetFromPost } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        -176
+      ],
+      "id": "78ff8ea3-78e0-4c5f-a544-968ebb9d501d",
+      "name": "Get Task Id"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dataforseo.com/v3/on_page/pages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[\n  {\n    \"id\": \"{{ $json.task_id }}\",\n    \"limit\": 1000,\n    \"offset\": 0,\n    \"filters\": [[\"resource_type\", \"=\", \"html\"]]\n  }\n]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1008,
+        -176
+      ],
+      "id": "23e4b210-22df-4f58-9e0a-cd1340c364c0",
+      "name": "Get On-Page Pages",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "861cV9KnepswAcIx",
+          "name": "DataForSeo"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst result = input?.tasks?.[0]?.result?.[0];\nconst items = result?.items || [];\n\nconst rows = items\n  .filter(page => page.resource_type === 'html' && page.meta)\n  .map(page => ({\n    url: page.url || '',\n    meta_title: page.meta.title || page.meta.meta_title || '',\n    meta_description: page.meta.description || '',\n    status_code: page.status_code,\n    onpage_score: page.onpage_score\n  }));\n\nreturn rows.map(row => ({ json: row }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -288,
+        288
+      ],
+      "id": "2a3b684a-f9c8-4076-84e3-d3c35cf75769",
+      "name": "Extract Meta Title & Description"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1B3MY4DeLz_pCEJeMG7_rJxk9kxIZG9pTUDuVYnvNJvo",
+          "mode": "list",
+          "cachedResultName": "MetaTitle and Description",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1B3MY4DeLz_pCEJeMG7_rJxk9kxIZG9pTUDuVYnvNJvo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Delta Solutions",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1B3MY4DeLz_pCEJeMG7_rJxk9kxIZG9pTUDuVYnvNJvo/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Meta Title ": "={{ $json.meta_title }}",
+            "Description": "={{ $json.meta_description }}",
+            "URL": "={{ $json.url }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Meta Title ",
+              "displayName": "Meta Title ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "URL",
+              "displayName": "URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        16,
+        64
+      ],
+      "id": "f5bced09-5ae0-4dc9-8b03-61b85e52ed04",
+      "name": "Save Data",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "V1XArvrpJWwWG254",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      version: \"0.1.20260223\",\n      status_code: 20000,\n      status_message: \"Ok.\",\n      time: \"0.1149 sec.\",\n      cost: 0.00125,\n      tasks_count: 1,\n      tasks_error: 0,\n      tasks: [\n        {\n          id: \"02240826-1292-0216-0000-4ec4ecbcd2de\",\n          status_code: 20100,\n          status_message: \"Task Created.\",\n          time: \"0.0062 sec.\",\n          cost: 0.00125,\n          result_count: 0,\n          path: [\"v3\", \"on_page\", \"task_post\"],\n          data: {\n            api: \"on_page\",\n            function: \"task_post\",\n            target: \"delta-solution.co.uk\",\n            max_crawl_pages: 10,\n            start_url: \"https://delta-solution.co.uk/\"\n          },\n          result: null\n        }\n      ]\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        -288
+      ],
+      "id": "b6b00aa2-9b80-4444-afbd-434bda7df50b",
+      "name": "Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(item => item.json);\nconst jsonStr = JSON.stringify(rows, null, 2);\n\nreturn [\n  {\n    json: {},\n    binary: {\n      file: {                    // <-- binary field name MUST be \"file\"\n        data: Buffer.from(jsonStr).toString('base64'),\n        mimeType: 'application/json',\n        fileName: 'temp.json'    // placeholder, Drive will override with File Name field\n      }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        288
+      ],
+      "id": "e9b369f2-cb8e-487d-80ff-1240e18e7448",
+      "name": "Convert To JSON"
+    },
+    {
+      "parameters": {
+        "inputDataFieldName": "=file",
+        "name": "={{ \n  'meta-' +\n  $node[\"Parse Webhook Input\"].json.start_url\n    .replace(/^https?:\\/\\//i, '')\n    .replace(/[^a-zA-Z0-9.\\-]+/g, '_')\n  + '-' +\n  (new Date()).toISOString().replace(/[:.]/g, '-')\n  + '.json'\n}}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive",
+          "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "=https://drive.google.com/drive/folders/1S_R2qjWvxouW9Q2Riixo9wosZMG9IPTB?dmr=1&ec=wgc-drive-hero-goto",
+          "mode": "url"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        224,
+        288
+      ],
+      "id": "4ae2f2fb-46f4-44e6-a0a5-414792c53472",
+      "name": "Upload file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "eBh6pygRVxYps7mk",
+          "name": "Google Drive account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      url: \"https://delta-solution.co.uk/\",\n      meta_title: \"Home - Delta Solution\",\n      meta_description: \"Choose Delta Solution for professional corporate and residential removals in London. From packing to storage, we handle your move with care & precision.\",\n      status_code: 200,\n      onpage_score: 91.59\n    }\n  },\n  {\n    json: {\n      url: \"https://delta-solution.co.uk/about-us/\",\n      meta_title: \"About Us - Delta Solution\",\n      meta_description: \"More Than Just a Removals Company Delta Solution is a London-based, family-run removals company built on trust, empathy and experience. What began as a part-time pursuit soon grew into a full-service residential and corporate relocation business, driven by one simple belief: every move is unique. Founded by Carlos Varejão, Delta was born from a passion for\",\n      status_code: 200,\n      onpage_score: 93.41\n    }\n  },\n  {\n    json: {\n      url: \"https://delta-solution.co.uk/services/\",\n      meta_title: \"Our Services - Delta Solution\",\n      meta_description: \"Comprehensive Relocation Services in London and the UK Delta Solution is a family-run removals company in London offering a complete range of services designed to make moving simple, seamless and stress-free. From careful packing and secure transport to furniture assembly and flexible storage, we cover every detail so you don't have to.Whether you're moving to\",\n      status_code: 200,\n      onpage_score: 93.41\n    }\n  },\n  {\n    json: {\n      url: \"https://delta-solution.co.uk/services/corporate-relocations/\",\n      meta_title: \"Corporate Relocations - Delta Solution\",\n      meta_description: \"Seamless Corporate Relocations in Crystal Palace, Tailored to Your Business Relocating your business doesn't have to mean downtime or lost productivity. Delta Solution's corporate relocations are designed to make moving your office efficient and stress-free. We understand that every minute of downtime costs you productivity, so our team works closely with you to plan a\",\n      status_code: 200,\n      onpage_score: 95.24\n    }\n  },\n  {\n    json: {\n      url: \"https://delta-solution.co.uk/services/furniture-fixtures-and-equipment-installations/\",\n      meta_title: \"Furniture, Fixtures and Equipment Installations - Delta Solution\",\n      meta_description: \"Expert furniture and equipment installations in Croydon, Bromley, Crystal Palace, Selhurst and London. Professional setup for homes and offices.\",\n      status_code: 200,\n      onpage_score: 95.24\n    }\n  },\n  {\n    json: {\n      url: \"https://delta-solution.co.uk/services/home-staging-services/\",\n      meta_title: \"Home Staging Services - Delta Solution\",\n      meta_description: \"Maximise your sale with trusted home staging services in London. Serving Croydon, Bromley, Crystal Palace, Selhurst and beyond with expert support.\",\n      status_code: 200,\n      onpage_score: 95.24\n    }\n  },\n  {\n    json: {\n      url: \"https://delta-solution.co.uk/services/premium-relocation-services/\",\n      meta_title: \"Premium Relocation Services - Delta Solution\",\n      meta_description: \"Premium Relocation Services in London, Delivered with Expert Care When a standard move isn't enough, Delta Solution offers premium relocation services that provide an unparalleled luxury moving experience. This bespoke service is designed for clients in Bromley, Croydon, Crystal Palace, Selhurst and beyond who require extra care, special handling and meticulous attention to detail. We\",\n      status_code: 200,\n      onpage_score: 95.24\n    }\n  },\n  {\n    json: {\n      url: \"https://delta-solution.co.uk/services/residential-removals/\",\n      meta_title: \"Residential Removals - Delta Solution\",\n      meta_description: \"Smooth, Stress-Free Residential Removals in Croydon Moving home doesn't have to be overwhelming. At Delta Solution, we specialise in residential removals that put care, clarity and comfort first. Whether you're relocating across the street or across the country, our experienced team ensures every part of your move is handled with precision, so you can focus\",\n      status_code: 200,\n      onpage_score: 95.24\n    }\n  },\n  {\n    json: {\n      url: \"https://delta-solution.co.uk/services/store-to-door-delivery/\",\n      meta_title: \"Store to Door Delivery - Delta Solution\",\n      meta_description: \"Reliable store to door delivery in Croydon, Bromley, Crystal Palace, Selhurst and London. Professional collection and delivery for homes and offices.\",\n      status_code: 200,\n      onpage_score: 95.24\n    }\n  },\n  {\n    json: {\n      url: \"https://delta-solution.co.uk/services/warehouse-fulfilment/\",\n      meta_title: \"Warehouse Fulfilment - Delta Solution\",\n      meta_description: \"Delta Solution offers expert warehouse fulfilment services across London, including Bromley, Croydon, Crystal Palace and Selhurst. Scalable and secure.\",\n      status_code: 200,\n      onpage_score: 95.24\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        64
+      ],
+      "id": "de0925d5-972a-42fc-9f10-8b28d1984406",
+      "name": "Complete Data"
+    },
+    {
+      "parameters": {
+        "fromEmail": "automation@programmx.com",
+        "toEmail": "=Meta Title and Description - {{ $(\"Parse Webhook Input\").first().json.email }}",
+        "subject": "=Meta Title and Description - {{ $(\"Parse Webhook Input\").first().json.start_url }}",
+        "html": "=<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: linear-gradient(135deg, #1a365d 0%, #2c5282 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0; text-align: center; }\n    .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px; }\n    .button { display: inline-block; background: #2b6cb0; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; margin: 10px 5px; }\n    .highlight { background: #ebf8ff; padding: 15px; border-radius: 5px; border-left: 4px solid #2b6cb0; margin: 15px 0; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>📊 Meta Title &amp; Description Report Ready</h1>\n    </div>\n    <div class=\"content\">\n      <p>Hello,</p>\n      \n      <p><strong>Meta Title &amp; Description </strong> has been generated and saved in Google Drive.</p>\n      \n      <div class=\"highlight\">\n        <h3 style=\"margin-top: 0;\">📋 Report Details:</h3>\n        <ul style=\"margin-bottom: 0;\">\n          <li><strong>Website:</strong> {{$node[\"Parse Webhook Input\"].json[\"start_url\"]}}</li>\n          <li><strong>Generated:</strong> {{$now.toISO()}}</li>\n          <li><strong>File:</strong> {{$json[\"name\"]}}</li>\n        </ul>\n      </div>\n\n      <div class=\"highlight\">\n        <h3 style=\"margin-top: 0;\">💳 DataForSEO Account Summary:</h3>\n        <ul style=\"margin-bottom: 0;\">\n          <li><strong>Total Deposited:</strong> {{$json[\"totalDeposited\"]}} USD</li>\n          <li><strong>Current Balance:</strong> {{$json[\"currentBalance\"]}} USD</li>\n          <li><strong>Total Spent:</strong> {{$json[\"totalSpent\"]}} USD</li>\n        </ul>\n      </div>\n\n      <div class=\"highlight\">\n        <h3 style=\"margin-top: 0;\">💰 This Session Costs:</h3>\n        <ul style=\"margin-bottom: 0;\">\n          <li><strong>Start OnPage Crawl:</strong> {{$json[\"costs\"][\"startOnPageCrawl\"]}} USD</li>\n          <li><strong>Check Tasks Ready:</strong> {{$json[\"costs\"][\"checkTasksReady\"]}} USD</li>\n          <li><strong>Get OnPage Pages:</strong> {{$json[\"costs\"][\"getOnPagePages\"]}} USD</li>\n          <li><strong>Total Session Cost:</strong> {{$json[\"totalSessionCost\"]}} USD</li>\n          <li><strong>Balance After Session:</strong> {{$json[\"balanceAfterSession\"]}} USD</li>\n        </ul>\n      </div>\n      \n      <p style=\"text-align: center;\">\n        <a href=\"{{$json[\"webViewLink\"]}}\" class=\"button\">\n          📄 View in Google Drive\n        </a>\n        <a href=\"{{$json[\"webContentLink\"]}}\" class=\"button\">\n          ⬇️ Download JSON File\n        </a>\n      </p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        976,
+        384
+      ],
+      "id": "a71b488b-8886-4b5a-b5e2-a9fbe3e8e2ad",
+      "name": "Send JSON",
+      "webhookId": "f6e37ca6-3b9a-45f1-8f7f-cd311eb924f1",
+      "credentials": {
+        "smtp": {
+          "id": "Powsux0m0r1TlNbw",
+          "name": "SMTP account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "automation@programmx.com",
+        "toEmail": "=",
+        "subject": "=Meta Title and Description Data",
+        "html": "=<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\" />\n  <title>Meta Title & Description</title>\n</head>\n<body style=\"font-family: Arial, sans-serif; font-size: 14px; color: #333; background-color: #f7f7f7; margin: 0; padding: 0;\">\n  <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n    <tr>\n      <td align=\"center\" style=\"padding: 24px 16px;\">\n        <table width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background: #ffffff; border-radius: 6px; overflow: hidden;\">\n          <tr>\n            <td style=\"padding: 20px 24px; border-bottom: 1px solid #e5e5e5; background-color: #0d6efd; color: #ffffff;\">\n              <h1 style=\"margin: 0; font-size: 18px; font-weight: 600;\">\n                Meta Title & Description Report\n              </h1>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"padding: 24px;\">\n              <p style=\"margin: 0 0 12px;\">\n                Hi,\n              </p>\n\n              <p style=\"margin: 0 0 12px;\">\n                The meta title and description is ready.\n              </p>\n\n              <p style=\"margin: 0 0 16px;\">\n                You can view the complete file in the shared Google Sheet using the link below:\n              </p>\n\n              <p style=\"margin: 0 0 24px;\">\n                <a href=\"https://docs.google.com/spreadsheets/d/XXXXXXXXXXXX/edit?usp=sharing\"\n                   style=\"display: inline-block; padding: 10px 18px; background-color: #0d6efd; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: 500;\">\n                  Open Meta Report\n                </a>\n              </p>\n\n              <p style=\"margin: 0 0 8px; font-size: 12px; color: #666;\">\n                If the button above doesn’t work, copy and paste this link into your browser:\n              </p>\n              <p style=\"margin: 0 0 24px; font-size: 12px; color: #0066cc; word-break: break-all;\">\n                https://docs.google.com/spreadsheets/d/1B3MY4DeLz_pCEJeMG7_rJxk9kxIZG9pTUDuVYnvNJvo/edit?gid=0#gid=0\n              </p>\n            </td>\n          </tr>\n        </table>\n      </td>\n    </tr>\n  </table>\n</body>\n</html>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1296,
+        64
+      ],
+      "id": "95f84aa9-8dd5-4baa-9fe4-a32b6b5dd63e",
+      "name": "Send File",
+      "webhookId": "f6e37ca6-3b9a-45f1-8f7f-cd311eb924f1",
+      "credentials": {
+        "smtp": {
+          "id": "Powsux0m0r1TlNbw",
+          "name": "SMTP account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.dataforseo.com/v3/appendix/user_data",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16,
+        496
+      ],
+      "id": "9164d396-4e7a-4c23-9a6f-8c1f722580b4",
+      "name": "DataForSEO User Data",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "861cV9KnepswAcIx",
+          "name": "DataForSeo"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── 1. User Account Data ──────────────────────────────────────\nconst userDataResponse = $node[\"DataForSEO User Data\"].json;\n\nif (!userDataResponse?.tasks?.[0]?.result?.[0]?.money) {\n  throw new Error('Unexpected user_data structure or missing money section.');\n}\n\nconst money = userDataResponse.tasks[0].result[0].money;\nconst totalDeposited = Number(money.total);\nconst currentBalance = Number(money.balance);\nconst totalSpent = totalDeposited - currentBalance;\n\n// ── 2. Read Costs from Each Node Response ─────────────────────\nconst crawlResponse     = $node[\"Start On-Page Crawl\"].json;\nconst tasksReadyResponse = $node[\"Check Tasks Ready\"].json;\nconst pagesResponse     = $node[\"Get On-Page Pages\"].json;\n\nconst crawlCost      = Number(crawlResponse?.cost ?? 0);\nconst tasksReadyCost = Number(tasksReadyResponse?.cost ?? 0);\nconst pagesCost      = Number(pagesResponse?.cost ?? 0);\nconst userDataCost   = Number(userDataResponse?.cost ?? 0);\n\n// ── 3. Sum of All API Calls This Session ──────────────────────\nconst totalSessionCost = crawlCost + tasksReadyCost + pagesCost + userDataCost;\n\n// ── 4. Return Everything ──────────────────────────────────────\nreturn [\n  {\n    json: {\n      // Account balance info\n      totalDeposited,\n      currentBalance,\n      totalSpent,\n\n      // Cost per endpoint\n      costs: {\n        startOnPageCrawl:  crawlCost,\n        checkTasksReady:   tasksReadyCost,\n        getOnPagePages:    pagesCost,\n        getUserData:       userDataCost,\n      },\n\n      // Total cost of this session's API calls\n      totalSessionCost,\n\n      // Balance after this session\n      balanceAfterSession: currentBalance - totalSessionCost,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        496
+      ],
+      "id": "92000c1a-63ba-4bec-b5ef-9a50703ec08f",
+      "name": "Parse User Data"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        448,
+        384
+      ],
+      "id": "5a8f8b0d-5db2-4308-b761-f6df7e386f74",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// We receive 2 items from Merge (Append):\n// items[0] = Drive file info\n// items[1] = Spend info\n\nconst file = items[0].json;\nconst spend = items[1].json;\n\n// Return ONE combined item\nreturn [\n  {\n    json: {\n      ...file,\n      ...spend,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        384
+      ],
+      "id": "5d15bcc0-9aa7-49b9-ae77-9ec1d477230d",
+      "name": "Combine File & Spend"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Webhook Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Webhook Input": {
+      "main": [
+        [
+          {
+            "node": "Start On-Page Crawl",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start On-Page Crawl": {
+      "main": [
+        [
+          {
+            "node": "Wait for Crawl",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Crawl": {
+      "main": [
+        [
+          {
+            "node": "Check Tasks Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Tasks Ready": {
+      "main": [
+        [
+          {
+            "node": "Get Task Id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Task Id": {
+      "main": [
+        [
+          {
+            "node": "Get On-Page Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get On-Page Pages": {
+      "main": [
+        [
+          {
+            "node": "Extract Meta Title & Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Meta Title & Description": {
+      "main": [
+        [
+          {
+            "node": "Save Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Convert To JSON",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "DataForSEO User Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Data": {
+      "main": [
+        []
+      ]
+    },
+    "Data": {
+      "main": [
+        []
+      ]
+    },
+    "Convert To JSON": {
+      "main": [
+        [
+          {
+            "node": "Upload file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload file": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Data": {
+      "main": [
+        []
+      ]
+    },
+    "Send File": {
+      "main": [
+        []
+      ]
+    },
+    "DataForSEO User Data": {
+      "main": [
+        [
+          {
+            "node": "Parse User Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse User Data": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Combine File & Spend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine File & Spend": {
+      "main": [
+        [
+          {
+            "node": "Send JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7339cfd2-283b-4c37-bd91-49c7c9d871e5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "151305d708accaf9ba7df3ae300984e7c14a108b131ed2d081a3bd48f670f5c4"
+  },
+  "id": "G9lYyRoxPKnY1qZz",
+  "tags": [
+    {
+      "updatedAt": "2025-03-14T12:08:26.948Z",
+      "createdAt": "2025-03-14T12:08:26.948Z",
+      "id": "TF9zcHoRnyCYBNVV",
+      "name": "SEO"
+    },
+    {
+      "updatedAt": "2026-02-24T06:05:54.044Z",
+      "createdAt": "2026-02-24T06:05:54.044Z",
+      "id": "VsoeexKwR1z4EK7M",
+      "name": "TITLE"
+    },
+    {
+      "updatedAt": "2026-02-24T06:05:57.957Z",
+      "createdAt": "2026-02-24T06:05:57.957Z",
+      "id": "xltNUnG5MLQiCg22",
+      "name": "DESCRIPTION"
+    }
+  ]
+}
